@@ -10,7 +10,7 @@ from app import models
 from app.database import get_db
 
 # Abhi seekhne ke liye yahan hai. Stage 9 me ise .env me le jayenge.
-SECRET_KEY = "dev-secret-change-me"
+SECRET_KEY = "paisatrack-dev-secret-key-change-me-before-deploy-12345"
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_MINUTES = 60
 

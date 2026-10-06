@@ -2,13 +2,15 @@ from fastapi import FastAPI
 
 from app import models
 from app.database import Base, engine
-from app.routes import auth, categories
+from app.routes import auth, categories, expenses, budgets  # NAYA: budgets
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 app.include_router(auth.router)
 app.include_router(categories.router)
+app.include_router(expenses.router)
+app.include_router(budgets.router)  # NAYA
 
 
 @app.get("/hello/{name}")
