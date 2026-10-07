@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaisaTrack</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f4f5f7; margin: 0; color: #222; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .card { background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  .cards .card { margin-bottom: 0; }
+  .num { font-size: 24px; font-weight: bold; }
+  .label { font-size: 13px; color: #666; }
+  .topline { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
+  .bar-track { background: #e5e7eb; height: 8px; border-radius: 4px; }
+  .bar-fill { height: 8px; border-radius: 4px; background: #2563eb; }
+  .bar-fill.warning { background: #f59e0b; }
+  .bar-fill.exceeded { background: #dc2626; }
+  .row { display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid #eee; font-size: 14px; }
+  .tag { background: #dbeafe; color: #1d4ed8; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+  .alert { background: #fef3c7; color: #92400e; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+  .alert.exceeded { background: #fee2e2; color: #991b1b; }
+  input, button { padding: 8px; font-size: 14px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PaisaTrack</h1>
+
+  <!-- LOGIN -->
+  <div id="login-box" class="card">
+    <h3>Login</h3>
+    <input id="email" placeholder="Email"><br><br>
+    <input id="password" type="password" placeholder="Password"><br><br>
+    <button onclick="login()">Login</button>
+    <p id="login-error" style="color:#dc2626"></p>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard" class="hidden">
+    <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+      <input type="month" id="month" onchange="loadDashboard()">
+      <button onclick="logout()">Logout</button>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="label">Spent this month</div><div class="num" id="spent">-</div></div>
+      <div class="card"><div class="label">Total budget</div><div class="num" id="budget">-</div></div>
+      <div class="card"><div class="label">Left to spend</div><div class="num" id="left">-</div></div>
+    </div>
+
+    <div id="alerts"></div>
+
+    <div class="card">
+      <h3>Budget by category</h3>
+      <div id="budgets"></div>
+    </div>
+
+    <div class="card">
+      <h3>Recent expenses</h3>
+      <div id="expenses"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- chhote helpers ----------
+  function money(n) {
+    return "₹" + Number(n).toLocaleString("en-IN");
+  }
+
+  // user ka likha text page me daalne se pehle safe bana deta hai
+  function esc(text) {
+    const d = document.createElement("div");
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  // har request me token jodta hai (ID card dikhana)
+  async function api(path) {
+    const token = localStorage.getItem("token");
+    const res = await fetch(path, { headers: { "Authorization": "Bearer " + token } });
+    if (res.status === 401 || res.status === 403) {
+      logout();
+      throw new Error("not logged in");
+    }
+    return res.json();
+  }
+
+  // ---------- login aur logout ----------
+  async function login() {
+    const res = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: document.getElementById("email").value,
+        password: document.getElementById("password").value
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      document.getElementById("login-error").textContent =
+        typeof data.detail === "string" ? data.detail : "Login failed";
+      return;
+    }
+    localStorage.setItem("token", data.access_token);
+    showDashboard();
+  }
+
+  function logout() {
+    localStorage.removeItem("token");
+    document.getElementById("dashboard").classList.add("hidden");
+    document.getElementById("login-box").classList.remove("hidden");
+  }
+
+  function showDashboard() {
+    document.getElementById("login-box").classList.add("hidden");
+    document.getElementById("dashboard").classList.remove("hidden");
+
+    const now = new Date();
+    const m = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    document.getElementById("month").value = m;
+    loadDashboard();
+  }
+
+  // ---------- dashboard ka data ----------
+  async function loadDashboard() {
+    const month = document.getElementById("month").value;
+    try {
+      const [summary, budgets, expenses, categories] = await Promise.all([
+        api("/reports/summary?month=" + month),
+        api("/budgets/status?month=" + month),
+        api("/expenses?month=" + month),
+        api("/categories")
+      ]);
+
+      // upar ke 3 cards
+      document.getElementById("spent").textContent = money(summary.total_spent);
+      document.getElementById("budget").textContent = money(summary.total_budget);
+      document.getElementById("left").textContent = money(summary.remaining);
+
+      // peele/laal alerts
+      document.getElementById("alerts").innerHTML = budgets
+        .filter(b => b.status !== "ok")
+        .map(b => {
+          const text = b.status === "exceeded"
+            ? esc(b.category) + " budget exceeded by " + money(-b.remaining)
+            : esc(b.category) + " budget " + b.percent_used + "% used. " + money(b.remaining) + " left.";
+          return '<div class="alert ' + b.status + '">' + text + "</div>";
+        }).join("");
+
+      // category-wise budget bars
+      document.getElementById("budgets").innerHTML = budgets.length === 0
+        ? '<p class="label">Is mahine ka koi budget set nahi hai</p>'
+        : budgets.map(b => `
+            <div style="margin-bottom:12px">
+              <div class="topline"><span>${esc(b.category)}</span>
+                <span class="label">${money(b.spent)} of ${money(b.limit)}</span></div>
+              <div class="bar-track">
+                <div class="bar-fill ${b.status}" style="width:${Math.min(b.percent_used, 100)}%"></div>
+              </div>
+            </div>`).join("");
+
+      // recent expenses ki list
+      const names = {};
+      categories.forEach(c => { names[c.id] = c.name; });
+
+      document.getElementById("expenses").innerHTML = expenses.length === 0
+        ? '<p class="label">Is mahine koi kharcha nahi hai</p>'
+        : expenses.slice(0, 10).map(e => `
+            <div class="row">
+              <div><span class="label">${e.date}</span> &nbsp; ${esc(e.note || "-")}
+                &nbsp; <span class="tag">${esc(names[e.category_id] || "?")}</span></div>
+              <b>${money(e.amount)}</b>
+            </div>`).join("");
+    } catch (err) {
+      console.log(err);
+    }
+  }
+
+  // ---------- page khulte hi ----------
+  if (localStorage.getItem("token")) {
+    showDashboard();
+  }
+</script>
+</body>
+</html>
