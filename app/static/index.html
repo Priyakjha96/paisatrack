@@ -21,8 +21,11 @@
   .tag { background: #dbeafe; color: #1d4ed8; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
   .alert { background: #fef3c7; color: #92400e; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
   .alert.exceeded { background: #fee2e2; color: #991b1b; }
-  input, button { padding: 8px; font-size: 14px; }
+  input, button, select { padding: 8px; font-size: 14px; }
   .hidden { display: none; }
+  /* NAYA */
+  .form-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .error { color: #dc2626; font-size: 13px; margin: 4px 0 0; }
 </style>
 </head>
 <body>
@@ -35,7 +38,7 @@
     <input id="email" placeholder="Email"><br><br>
     <input id="password" type="password" placeholder="Password"><br><br>
     <button onclick="login()">Login</button>
-    <p id="login-error" style="color:#dc2626"></p>
+    <p id="login-error" class="error"></p>
   </div>
 
   <!-- DASHBOARD -->
@@ -53,9 +56,33 @@
 
     <div id="alerts"></div>
 
+    <!-- NAYA: kharcha add karne ka form -->
+    <div class="card">
+      <h3>Add expense</h3>
+      <div class="form-row">
+        <input id="f-amount" type="number" min="0" step="0.01" placeholder="Amount (Rs)">
+        <select id="f-category"></select>
+        <input id="f-note" placeholder="Note (jaise Zomato dinner)">
+        <input id="f-date" type="date">
+        <button onclick="addExpense()">Add</button>
+      </div>
+      <p id="form-error" class="error"></p>
+      <div class="form-row" style="margin-top:12px">
+        <input id="c-name" placeholder="Nayi category (jaise Food)">
+        <button onclick="addCategory()">Add category</button>
+      </div>
+      <p id="cat-error" class="error"></p>
+    </div>
+
     <div class="card">
       <h3>Budget by category</h3>
       <div id="budgets"></div>
+    </div>
+
+    <!-- NAYA: category-wise kharcha -->
+    <div class="card">
+      <h3>Spending by category</h3>
+      <div id="by-category"></div>
     </div>
 
     <div class="card">
@@ -78,15 +105,25 @@
     return d.innerHTML;
   }
 
-  // har request me token jodta hai (ID card dikhana)
-  async function api(path) {
+  // NAYA (badla hua): ab GET ke saath POST bhi bhej sakta hai, aur error pe message deta hai
+  async function api(path, options = {}) {
     const token = localStorage.getItem("token");
-    const res = await fetch(path, { headers: { "Authorization": "Bearer " + token } });
+    const res = await fetch(path, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token
+      }
+    });
     if (res.status === 401 || res.status === 403) {
       logout();
       throw new Error("not logged in");
     }
-    return res.json();
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(typeof data.detail === "string" ? data.detail : "Something went wrong");
+    }
+    return data;
   }
 
   // ---------- login aur logout ----------
@@ -125,15 +162,59 @@
     loadDashboard();
   }
 
+  // NAYA: form se kharcha add karna
+  async function addExpense() {
+    const err = document.getElementById("form-error");
+    err.textContent = "";
+
+    const amount = parseFloat(document.getElementById("f-amount").value);
+    const category_id = parseInt(document.getElementById("f-category").value);
+    const note = document.getElementById("f-note").value;
+    const date = document.getElementById("f-date").value;
+
+    if (!amount || amount <= 0) { err.textContent = "Amount daalo"; return; }
+    if (!category_id) { err.textContent = "Category chuno"; return; }
+
+    const body = { amount: amount, category_id: category_id, note: note };
+    if (date) { body.date = date; }
+
+    try {
+      await api("/expenses", { method: "POST", body: JSON.stringify(body) });
+      document.getElementById("f-amount").value = "";
+      document.getElementById("f-note").value = "";
+      loadDashboard();
+    } catch (e) {
+      err.textContent = e.message;
+    }
+  }
+
+  // NAYA: nayi category banana
+  async function addCategory() {
+    const err = document.getElementById("cat-error");
+    err.textContent = "";
+    const input = document.getElementById("c-name");
+
+    if (!input.value.trim()) { err.textContent = "Category ka naam likho"; return; }
+
+    try {
+      await api("/categories", { method: "POST", body: JSON.stringify({ name: input.value.trim() }) });
+      input.value = "";
+      loadDashboard();
+    } catch (e) {
+      err.textContent = e.message;
+    }
+  }
+
   // ---------- dashboard ka data ----------
   async function loadDashboard() {
     const month = document.getElementById("month").value;
     try {
-      const [summary, budgets, expenses, categories] = await Promise.all([
+      const [summary, budgets, expenses, categories, byCat] = await Promise.all([
         api("/reports/summary?month=" + month),
         api("/budgets/status?month=" + month),
         api("/expenses?month=" + month),
-        api("/categories")
+        api("/categories"),
+        api("/reports/by-category?month=" + month)   // NAYA
       ]);
 
       // upar ke 3 cards
@@ -151,6 +232,13 @@
           return '<div class="alert ' + b.status + '">' + text + "</div>";
         }).join("");
 
+      // NAYA: form ke dropdown me categories bharna
+      const select = document.getElementById("f-category");
+      const selected = select.value;
+      select.innerHTML = '<option value="">Category chuno</option>' +
+        categories.map(c => '<option value="' + c.id + '">' + esc(c.name) + "</option>").join("");
+      select.value = selected;
+
       // category-wise budget bars
       document.getElementById("budgets").innerHTML = budgets.length === 0
         ? '<p class="label">Is mahine ka koi budget set nahi hai</p>'
@@ -161,6 +249,16 @@
               <div class="bar-track">
                 <div class="bar-fill ${b.status}" style="width:${Math.min(b.percent_used, 100)}%"></div>
               </div>
+            </div>`).join("");
+
+      // NAYA: category-wise kharcha (chart)
+      document.getElementById("by-category").innerHTML = byCat.length === 0
+        ? '<p class="label">Is mahine koi kharcha nahi hai</p>'
+        : byCat.map(c => `
+            <div style="margin-bottom:12px">
+              <div class="topline"><span>${esc(c.category)}</span>
+                <span class="label">${money(c.total)} (${c.percent}%)</span></div>
+              <div class="bar-track"><div class="bar-fill" style="width:${c.percent}%"></div></div>
             </div>`).join("");
 
       // recent expenses ki list
