@@ -82,3 +82,20 @@ class BudgetStatus(BaseModel):
     remaining: float
     percent_used: float
     status: str
+
+
+    # NAYA
+class MonthSummary(BaseModel):
+    month: str
+    total_spent: float
+    total_budget: float
+    remaining: float
+    expense_count: int
+
+
+# NAYA
+class CategoryTotal(BaseModel):
+    category_id: int
+    category: str
+    total: float
+    percent: float
